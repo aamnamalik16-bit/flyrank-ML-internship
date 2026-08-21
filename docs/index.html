@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Which Query-Page Pairs Deserve Optimization Attention? — FlyRank ML Internship</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 860px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.7; }
+  h1 { font-size: 2em; margin-bottom: 0.2em; }
+  h2 { font-size: 1.3em; border-bottom: 2px solid #ddd; padding-bottom: 6px; margin-top: 2em; }
+  .abstract { background: #f9f9f9; border-left: 4px solid #555; padding: 16px 20px; margin: 1.5em 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+  th { background: #f0f0f0; }
+  img { max-width: 100%; margin: 1em 0; }
+  .caption { font-size: 0.9em; color: #555; margin-top: -0.5em; margin-bottom: 1em; }
+  .honest { color: #555; font-style: italic; }
+  footer { margin-top: 3em; font-size: 0.85em; color: #777; border-top: 1px solid #ddd; padding-top: 1em; }
+</style>
+</head>
+<body>
+
+<h1>Which Query-Page Pairs Deserve Optimization Attention First?</h1>
+<p><em>FlyRank ML Internship — Applied Search Intelligence Track — August 2026</em></p>
+
+<div class="abstract">
+<strong>Abstract:</strong> Content teams managing large search portfolios cannot manually review every query-page pair each week. This study uses the FlyRank internship warehouse (2.4 million query-page pairs across 52 clients) to build a decision-support ranking system that surfaces pairs where click momentum has dropped. Using a transparent rule-based baseline and a Random Forest model evaluated under a grouped client holdout, we observed that the impressions-based baseline achieves Precision@20 = 0.30, while the Random Forest achieves 0.20 under the honest split — revealing that safe query-level features alone are insufficient to predict click momentum across unseen clients. The output is a ranked action queue intended to help content teams prioritize which pages to review first, not an automated content editor.
+</div>
+
+<h2>1. Introduction</h2>
+<p>A content strategist managing hundreds of pages across dozens of clients cannot review everything every week. The question this work addresses is: <strong>which query-page pairs show signals of declining click performance and deserve human review first?</strong></p>
+<p>A wrong recommendation costs reviewer time — a false positive sends someone to a healthy page. A missed opportunity means a declining page goes unreviewed and keeps losing clicks. The output of this system is a ranked list, not an automated action.</p>
+
+<h2>2. Data</h2>
+<p>Source: <strong>FlyRank internship warehouse</strong>, build <code>flyrank_pseudonymized_warehouse_release_v20260703</code>, hosted on Hugging Face at <a href="https://huggingface.co/datasets/FlyRank/internship-warehouse">FlyRank/internship-warehouse</a>.</p>
+<table>
+<tr><th>Table</th><th>Rows</th><th>Grain</th></tr>
+<tr><td>fact_content_query_90d</td><td>2,414,248</td><td>client × content × query hash (fixed 90-day window)</td></tr>
+<tr><td>dim_clients</td><td>104</td><td>one per pseudonymized client</td></tr>
+</table>
+<p><strong>Time window:</strong> Fixed 90-day snapshot with pre-computed last-30 and previous-30 day sub-windows. Window start: 2026-04-02.</p>
+<p><strong>Excluded:</strong> Rows with fewer than 10 impressions in the last 30 days — too sparse to distinguish signal from noise. Inactive clients excluded via <code>is_active IS TRUE</code> filter.</p>
+<p class="honest">All identifiers are pseudonymized. No client names, domains, URLs, or raw queries appear in this analysis.</p>
+
+<h2>3. Methodology</h2>
+<p><strong>Label / proxy:</strong> <code>is_rising = (clicks_last30 &gt; clicks_prev30)</code> — a binary proxy for click momentum. Base rate: 6.1% of eligible rows.</p>
+<p><strong>Safe features used:</strong> impressions_90d, avg_position_90d, query_char_count, query_token_count, content_visible_query_count, rare_query_count, rare_impressions_share, anonymized_impressions_share. No click columns used as features — clicks derive the label.</p>
+<p><strong>Baseline rule:</strong> Rank by <code>impressions_last30 × ABS(click_delta)</code> with reason code <code>visible_but_losing_clicks</code>.</p>
+<p><strong>Model:</strong> Random Forest Classifier (100 trees, random_state=42).</p>
+<p><strong>Validation design:</strong> Grouped client holdout — 80% of clients for training (39 clients), 20% for testing (10 clients). No client appears in both train and test. This tests generalization to unseen clients.</p>
+<p><strong>Leakage checks:</strong> click_delta was identified as a leaky feature (score jumped to 1.0 when included) and removed. Random split vs grouped split gap (0.85 → 0.20) confirmed client-level memorization in the random split.</p>
+
+<h2>4. Results</h2>
+<table>
+<tr><th>Method</th><th>Precision@20</th></tr>
+<tr><td>Base rate (random)</td><td>0.061</td></tr>
+<tr><td>Baseline (impressions rule)</td><td>0.300</td></tr>
+<tr><td>Logistic Regression</td><td>0.100</td></tr>
+<tr><td>Random Forest (grouped split)</td><td>0.200</td></tr>
+</table>
+<p class="caption">All results computed on the same 10-client holdout set under grouped client split.</p>
+<img src="reason_code_distribution.png" alt="Reason code distribution chart">
+<p class="caption">Figure 1: Distribution of reason codes across 838,657 eligible query-page pairs. The majority are flagged for monitoring; 55,340 are flagged as visible_but_losing_clicks.</p>
+
+<h2>5. Limitations</h2>
+<ul>
+<li>Safe features alone (impressions, position, query shape) do not strongly predict click momentum — the baseline outperforms the model under honest evaluation.</li>
+<li>The fixed 90-day window cannot be re-sliced by month — no true past→future label is possible without joining to the daily performance table.</li>
+<li>Seasonality is not modeled — a click drop in some months may be normal for certain topics.</li>
+<li>Precision@20 = 0.20 means approximately 4 of 20 top recommendations are genuine opportunities; human review is required for all flagged pages.</li>
+<li>Results observed on 52 pseudonymized clients — generalization to other portfolios is not established.</li>
+</ul>
+
+<h2>6. Ranked Recommendations</h2>
+<table>
+<tr><th>Reason Code</th><th>Action</th><th>Count</th></tr>
+<tr><td>visible_but_losing_clicks</td><td>review_query_targeting</td><td>55,340</td></tr>
+<tr><td>high_impression_low_clicks</td><td>review_title_and_meta</td><td>37,462</td></tr>
+<tr><td>rare_query_opportunity</td><td>expand_content_coverage</td><td>3,218</td></tr>
+<tr><td>monitor</td><td>no_action_now</td><td>742,637</td></tr>
+</table>
+<p>Pages are ranked by <code>baseline_score = impressions_last30 × ABS(click_delta)</code>. A content team with capacity to review 20 pages per week should work from the top of the <code>visible_but_losing_clicks</code> queue downward.</p>
+<p><strong>What should NOT be automated:</strong> No content edits, page deletions, or merges should be triggered automatically. This queue is a prioritization tool for human reviewers only.</p>
+
+<h2>7. Reproducibility</h2>
+<p>All notebooks are in <a href="https://github.com/aamnamalik16-bit/flyrank-ML-internship">github.com/aamnamalik16-bit/flyrank-ML-internship</a> under <code>work/notebooks/</code>:</p>
+<ul>
+<li>w01_research_question.ipynb — lane framing</li>
+<li>w02_ml_task_framing.ipynb — ML task definition</li>
+<li>w03_data_contract.ipynb — data contract and verification</li>
+<li>w04_baseline_score.ipynb — baseline rule and queue</li>
+<li>w05_model.ipynb — model training and comparison</li>
+<li>w06_validation_audit.ipynb — leakage audit and honest split</li>
+<li>w07_action_playbook.ipynb — action playbook and exports</li>
+</ul>
+<p>To reproduce: clone the repo, set HF_TOKEN in Colab Secrets, run notebooks in order. Random seed: 42.</p>
+
+<h2>8. Acknowledgments & Data Credit</h2>
+<p>Built on the <strong>FlyRank ML Internship dataset</strong> — a pseudonymized warehouse release of real production search and analytics data. Data source: <a href="https://flyrank.ai">flyrank.ai</a>. Dataset: <a href="https://huggingface.co/datasets/FlyRank/internship-warehouse">FlyRank/internship-warehouse</a> on Hugging Face.</p>
+
+<footer>
+<p>FlyRank ML Internship — Applied Search Intelligence Track — August 2026. All findings are observational and directional. No causal claims are made.</p>
+</footer>
+
+</body>
+</html>
